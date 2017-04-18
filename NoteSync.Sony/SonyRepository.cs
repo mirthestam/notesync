@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
+using System.Text.RegularExpressions;
 using System.Xml;
 using System.Xml.XPath;
 using NLog;
@@ -10,6 +11,8 @@ namespace NoteSync.Sony
 {
     public class SonyRepository : ISourceRepository
     {
+        private static readonly Regex TagRegex = new Regex(@"\[.*?\]", RegexOptions.Compiled);
+
         private readonly ILogger _logger;
         private readonly SonySettings _settings;
 
@@ -49,9 +52,12 @@ namespace NoteSync.Sony
             return notes;
         }
 
-        private bool TryReadNoteFromFile(string fileName, out Note note)
+        private bool TryReadNoteFromFile(string fileName, out Note result)
         {
-            var tempNote = new Note();
+            var note = new Note
+            {
+                Id = Path.GetFileNameWithoutExtension(fileName)
+            };
 
             using (var stream = File.OpenRead(fileName))
             {
@@ -72,22 +78,53 @@ namespace NoteSync.Sony
                         var dateTime = new DateTime(1970, 1, 1, 0, 0, 0, DateTimeKind.Utc);
                         var value = createDateAttribute.ValueAsDouble;
                         dateTime = dateTime.AddMilliseconds(value);
-                        dateTime = dateTime.ToLocalTime();
+                        dateTime = dateTime.ToLocalTime();                        
+                        note.Created = dateTime;
+                        note.Modified = dateTime; // Note the sony reader has no modified timestamp
 
-                        tempNote.Created = dateTime;
-                        tempNote.Modified = dateTime; // Note the sony reader has no modified timestamp
-                        tempNote.Id = Path.GetFileNameWithoutExtension(fileName);
-                        tempNote.Title = textNode.Value.Split(Environment.NewLine.ToCharArray())[0];
-                        tempNote.Body = textNode.Value;
+                        var lines = textNode.Value.Split(Environment.NewLine.ToCharArray()).ToList();
 
-                        note = tempNote;
+                        // Tags on first line are notebook tags. This should be one or none.
+                        // Tags on second line are note tags                    
+                        var titleTags = ExtractTags(lines[0]).ToList();
+                        if (titleTags.Count == 1) note.Folder = titleTags[0].Trim();
+                        
+                        note.Title = RemoveTags(lines[0]);
+                        lines.RemoveAt(0); // Remove the title line from the note body                        
+
+                        // Check whether we have any lines left (could be, a note only has a titel)
+                        if (lines.Count >= 1)
+                        {
+                            // Try to fetch tags from the second line. This is an optional tag line
+                            note.Tags = ExtractTags(lines[0]);
+                            lines[0] = RemoveTags(lines[0]);
+                        }
+                                                
+                        // Build the body. Skip trailing empty lines
+                        note.Body = string.Join(Environment.NewLine, lines.SkipWhile(string.IsNullOrWhiteSpace));
+                        result = note;
                         return true;
                     }
                 }
             }
 
-            note = null;
+            result = null;
             return false;
+        }            
+
+        public string[] ExtractTags(string line)
+        {
+            var matches = TagRegex.Matches(line);
+
+            return matches
+                .Cast<Match>()
+                .Select(m => m.Value.Substring(1, m.Value.Length - 2))
+                .ToArray();
+        }
+
+        public string RemoveTags(string line)
+        {
+            return TagRegex.Replace(line, "").Trim();
         }
     }
 }

@@ -16,7 +16,7 @@ namespace WindowsService
             For<ITargetRepository>().Use<EvernoteRepository>();
 
             // The trigger do determine when to syncronize
-            For<ITrigger>().Use<RemovableDeviceTrigger>();
+            For<ITrigger>().Use<InstantTrigger>();
 
             // The strategy for how to merge notes
             For<IMergeStrategy>().Use<OneWayMergeStrategy>();

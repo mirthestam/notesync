@@ -12,6 +12,8 @@ namespace NoteSync
             right.Title = left.Title;
             right.Created = left.Created;
             right.Modified = left.Modified;
+            right.Tags = left.Tags;
+            right.Folder = left.Folder;
 
             return true;
         }

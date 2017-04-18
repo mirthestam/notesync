@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Linq;
 using EvernoteSDK;
 using EvernoteSDK.Advanced;
 using NLog;
@@ -48,14 +49,23 @@ namespace NoteSync.Evernote
 
         public void SaveNote(Note note)
         {
-            // TODO: Note has timestamps. Change the evernote timestamps
-            // TODO: note has existing tags. Respect the existing tags.
+            // Build the list of tags
+            var tags = note.Tags?.ToList() ?? new List<string>();
+            tags.Add(_settings.Tag);
+
             var externalNote = new ENNote
             {
                 Title = note.Title.Trim(),
                 Content = ENNoteContent.NoteContentWithString(note.Body),
-                TagNames = new List<string>(new[] {_settings.Tag})
+                TagNames = new List<string>(tags),                               
             };
+
+            // Find the target notebook
+            ENNotebook notebook = null;
+            if (!string.IsNullOrWhiteSpace(note.Folder))
+            {
+                notebook = _session.ListNotebooks().FirstOrDefault(n => n.Name == note.Folder);
+            }
 
             // Find the note to update
             ENSessionFindNotesResult findNoteResult;
@@ -63,12 +73,19 @@ namespace NoteSync.Evernote
             {
                 // Update the existing note
                 var existingNoteRef = findNoteResult.NoteRef;
-                _session.UploadNote(externalNote, ENSession.UploadPolicy.ReplaceOrCreate, findNoteResult.Notebook, existingNoteRef);
+
+                if (notebook != null && findNoteResult.Notebook.Name != notebook.Name)
+                {
+                    _logger.Warn($"Note has changed notebook to '{notebook.Name}' however it has been stored in Evernote as '{findNoteResult.Notebook.Name }'. The note cannot be moved.");
+                }
+
+                findNoteResult.Notebook = notebook ?? findNoteResult.Notebook;
+                _session.UploadNote(externalNote, ENSession.UploadPolicy.Replace, findNoteResult.Notebook, existingNoteRef);
             }
             else
             {
                 // Upload to the default notebook
-                var noteRef = _session.UploadNote(externalNote, null);
+                var noteRef = _session.UploadNote(externalNote, notebook);
 
                 // Set the note identifier in the application meta data
                 _session.PrimaryNoteStore.SetNoteApplicationDataEntry(noteRef.Guid, "NoteSync", note.Id);
